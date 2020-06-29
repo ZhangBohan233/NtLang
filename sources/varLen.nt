@@ -1,0 +1,10 @@
+
+(def sum (fn (a * rest)
+    (+ a (list.length rest))))
+
+## (con sum (int? int? -> int?))
+
+(def apl (fn (a b c d)
+    (+ a (+ b (+ c d)))))
+
+: (apply + '(1 2))

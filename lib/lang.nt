@@ -53,3 +53,7 @@
         null
         (list (ftn (list.head lst)) (map ftn (list.tail lst))))))
 
+## (def apply2 (fn (ftn lst)
+    (if (null? lst)
+        )))
+

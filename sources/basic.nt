@@ -16,8 +16,8 @@
 (def dd (point 1 1))
 (def ee (point3d 1 2 3))
 
-(def tup ;(1 2 3))
+(def tup '(1 2 3))
 
-(def lst (list ;(3 2 4)))
+(def lst (list '(3 2 4)))
 
 : lst

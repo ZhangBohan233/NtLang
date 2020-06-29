@@ -2,6 +2,6 @@
 
 (def f (fn (x) (+ x x)))
 
-(def m (map f (list.make ;(1 2))))
+(def m (map f (list.make '(1 2))))
 
 : (list.get m 0)

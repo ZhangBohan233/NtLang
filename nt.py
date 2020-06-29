@@ -11,7 +11,7 @@ def read_file(file_name, parent_path) -> str:
 
 
 def parse(source: str) -> list:
-    tokens = ["("] + re.split("(\s|(?<!;)\(|;\(|\)|\[|\])", source) + [")"]
+    tokens = ["("] + re.split("(\s|(?<!')\(|'\(|\)|\[|\])", source) + [")"]
     # print(tokens)
     stack = []
     comment = False
@@ -40,7 +40,7 @@ def parse(source: str) -> list:
                         if len(stack) < 2:
                             break
                         stack[-2].append(stack.pop())
-                    elif tk == ";(":
+                    elif tk == "'(":
                         stack.append(Tuple())
                     elif tk not in OMITTED:
                         stack[-1].append(tk)
@@ -106,15 +106,42 @@ class Function:
         return self.param_contracts is not None and self.param_contracts is not None
 
     def call(self, eval_ftn, args: list):
+        """
+        Call a user-defined function.
+
+        :param eval_ftn: the python recursive interpreter function
+        :param args: evaluated arguments
+        :return: the return value of the function called
+        """
         params_count = len(self.params)
-        if params_count != len(args):
+        var_len_param = "*" in self.params
+
+        if not var_len_param and params_count != len(args):
             raise Error("Arity mismatch. Expected: {}, actual: {}.".format(params_count, len(args)))
 
         call_env = Env(self.def_env)
         for i in range(params_count):
             name = self.params[i]
+            if name == "*":
+                if i != params_count - 2:
+                    raise Error("Variable length parameter must be the last parameter.")
+                name = self.params[i + 1]
+                tup = Tuple()
+                for j in range(i, len(args)):
+                    arg = args[j]
+                    if self.param_contracts:
+                        con = self.param_contracts[i]
+                        check_contract(con, arg, eval_ftn)
+                    tup.append(arg)
+
+                nt_list = tuple_to_nt_list(tup, eval_ftn, call_env)
+                if isinstance(name, str) and name not in INVALID_NAME:
+                    call_env.put(name, nt_list)
+
+                break
+
             arg = args[i]
-            if self.param_contracts is not None:
+            if self.param_contracts:
                 con = self.param_contracts[i]
                 # print(con, arg)
                 check_contract(con, arg, eval_ftn)
@@ -213,11 +240,11 @@ class StructObj:
 
 
 class Tuple(list):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args):
+        super().__init__(args)
 
     def __str__(self):
-        return ";" + super().__str__()
+        return "tuple" + super().__repr__()
 
     def __repr__(self):
         return "tuple" + super().__repr__()
@@ -237,6 +264,25 @@ def boolean(value: bool) -> Boolean:
 
 def is_fn(f) -> Boolean:
     return boolean(callable(f) or isinstance(f, Function))
+
+
+def nt_apply(eval_ftn, env: Env):
+    def apply(ftn, lst):
+        if callable(ftn):
+            if isinstance(lst, StructObj) and lst.struct.name == "list":
+                py_lst = nt_list_to_py_list(lst, eval_ftn, env)
+                return ftn(*py_lst)
+            else:
+                raise Error("Apply takes a list as second argument.")
+        elif isinstance(ftn, Function):
+            if isinstance(lst, StructObj) and lst.struct.name == "list":
+                py_lst = nt_list_to_py_list(lst, eval_ftn, env)
+                return ftn.call(eval_ftn, py_lst)
+            else:
+                raise Error("Apply takes a list as second argument.")
+        else:
+            raise Error("Apply takes either a builtin function or a user-defined function as first argument.")
+    return apply
 
 
 def error(error_str: str):
@@ -272,7 +318,7 @@ def make_struct(name: str, parent, content: list, env: Env):
     return struct
 
 
-def put_builtins(env: Env):
+def put_builtins(env: Env, main_eval_ftn):
     env.put("+", lambda a, b: a + b)
     env.put("-", lambda a, b: a - b)
     env.put("*", lambda a, b: a * b)
@@ -285,6 +331,7 @@ def put_builtins(env: Env):
     env.put("==", lambda a, b: boolean(a == b))
     env.put("and", lambda *args: boolean(all(args)))
     env.put("any", lambda x: TRUE)
+    env.put("apply", nt_apply(main_eval_ftn, env))
     env.put("boolean?", lambda b: boolean(b is TRUE or b is FALSE))
     env.put("float", lambda x: float(x))
     env.put("float?", lambda x: boolean(isinstance(x, float)))
@@ -299,13 +346,20 @@ def put_builtins(env: Env):
 
 
 class NtFileInterpreter:
-    def __init__(self, file_path):
+    def __init__(self, file_path, required):
         self.file_path = os.path.abspath(file_path)
         self.parent_dir = os.path.dirname(self.file_path)
 
+        self.required: set = required
         self.traceback = []
 
     def get_import_path(self, name):
+        """
+        Returns the absolute path if the required file is a user-defined library.
+
+        :param name:
+        :return:
+        """
         if (name[0] == '"' and name[-1] == '"') or (name[0] == "'" and name[-1] == "'"):  # user's lib
             pure_name = name[1:-1]
             if os.path.isabs(pure_name):
@@ -322,7 +376,10 @@ class NtFileInterpreter:
         # print(program)
         if env is None:
             env = Env(None)
-            put_builtins(env)
+            put_builtins(env, self.evaluate)
+
+        self.evaluate(["require", "lang"], env)
+
         res = NULL
         i = 0
         try:
@@ -352,7 +409,7 @@ class NtFileInterpreter:
         elif isinstance(expr, str):
             return env.get(expr)
         elif expr.__class__ == Tuple:
-            return expr
+            return tuple_to_nt_list(expr, self.evaluate, env)
         elif expr.__class__ == list:
             if len(expr) > 0:
                 first = expr[0]
@@ -421,7 +478,7 @@ class NtFileInterpreter:
                         if len(contracts) > 1 and contracts[-2] == "->":
                             param_cons = contracts[:-2]
                             rtn_con = contracts[-1]
-                            if len(param_cons) != len(ftn.params):
+                            if "*" not in ftn.params and len(param_cons) != len(ftn.params):
                                 raise Error("Contracts must have the same number of parameters as the function.")
                             eval_param_cons = []
                             for i in range(len(param_cons)):
@@ -460,8 +517,11 @@ class NtFileInterpreter:
                 elif first == "require":
                     if len(expr) == 2:
                         file_name = expr[1]
-                        file_itr = NtFileInterpreter(self.get_import_path(file_name))
-                        file_itr.interpret(False, env)
+                        full_path = self.get_import_path(file_name)
+                        if full_path not in self.required:  # avoid duplicate request
+                            self.required.add(full_path)
+                            file_itr = NtFileInterpreter(full_path, self.required)
+                            file_itr.interpret(False, env)
                     else:
                         raise Error("Require must have two parts: (require file). ")
                 else:  # function call
@@ -480,6 +540,21 @@ class NtFileInterpreter:
 
 
 # helper functions
+
+def tuple_to_nt_list(tup: Tuple, eval_ftn, env: Env):
+    make: Function = env.get("list.make")
+    return make.call(eval_ftn, [tup])
+
+
+def nt_list_to_py_list(lst: StructObj, eval_ftn, env: Env) -> list:
+    get: Function = env.get("list.get")
+    len_ftn: Function = env.get("list.length")
+    length: int = len_ftn.call(eval_ftn, [lst])
+    py_lst = []
+    for i in range(length):
+        py_lst.append(get.call(eval_ftn, [lst, i]))
+    return py_lst
+
 
 def is_int(s: str) -> bool:
     try:
@@ -515,6 +590,6 @@ if __name__ == '__main__':
 
     if len(sys.argv) > 1:
         src_file = sys.argv[1]
-        itr = NtFileInterpreter(src_file)
+        itr = NtFileInterpreter(src_file, set())
         rtn = itr.interpret(True)
         print(rtn)

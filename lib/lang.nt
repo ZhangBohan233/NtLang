@@ -1,4 +1,6 @@
 
+# List related #
+
 #
 # A list struct
 # Implemented in linked-list data structure.
@@ -42,3 +44,12 @@
     (list._reverse lst null)))
 
 (con list.reverse (list.listOrNull? -> list.listOrNull?))
+
+
+# Functions #
+
+(def map (fn (ftn lst)
+    (if (null? lst)
+        null
+        (list (ftn (list.head lst)) (map ftn (list.tail lst))))))
+

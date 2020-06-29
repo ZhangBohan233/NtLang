@@ -24,7 +24,17 @@ def parse(source: str) -> list:
                     comment = False
 
                 if not comment:
-                    if tk == "(" or tk == "[":
+                    if is_int(tk):
+                        stack[-1].append(int(tk))
+                    elif is_float(tk):
+                        stack[-1].append(float(tk))
+                    elif tk == "true":
+                        stack[-1].append(TRUE)
+                    elif tk == "false":
+                        stack[-1].append(FALSE)
+                    elif tk == "null":
+                        stack[-1].append(NULL)
+                    elif tk == "(" or tk == "[":
                         stack.append([])
                     elif tk == ")" or tk == "]":
                         if len(stack) < 2:
@@ -218,6 +228,9 @@ FALSE = Boolean(False)
 NULL = Null()
 
 
+DIRECT_RETURN_TYPES = {int, float, Boolean, Null}
+
+
 def boolean(value: bool) -> Boolean:
     return TRUE if value else FALSE
 
@@ -270,7 +283,7 @@ def put_builtins(env: Env):
     env.put(">", lambda a, b: boolean(a > b))
     env.put(">=", lambda a, b: boolean(a >= b))
     env.put("==", lambda a, b: boolean(a == b))
-    env.put("and", lambda a, b: boolean(a and b))
+    env.put("and", lambda *args: boolean(all(args)))
     env.put("any", lambda x: TRUE)
     env.put("boolean?", lambda b: boolean(b is TRUE or b is FALSE))
     env.put("float", lambda x: float(x))
@@ -279,7 +292,7 @@ def put_builtins(env: Env):
     env.put("int?", lambda x: boolean(isinstance(x, int)))
     env.put("fn?", is_fn)
     env.put("null?", lambda n: boolean(n is NULL))
-    env.put("or", lambda a, b: boolean(a or b))
+    env.put("or", lambda *args: boolean(any(args)))
     env.put("tuple?", lambda t: boolean(isinstance(t, Tuple)))
     env.put("tuple.get", lambda t, i: t[i])
     env.put("tuple.length", lambda t: len(t))
@@ -334,19 +347,10 @@ class NtFileInterpreter:
 
     def evaluate(self, expr, env: Env):
         self.traceback.append(expr)
-        if isinstance(expr, str):
-            if is_int(expr):
-                return int(expr)
-            elif is_float(expr):
-                return float(expr)
-            elif expr == "true":
-                return TRUE
-            elif expr == "false":
-                return FALSE
-            elif expr == "null":
-                return NULL
-            else:
-                return env.get(expr)
+        if expr.__class__ in DIRECT_RETURN_TYPES:
+            return expr
+        elif isinstance(expr, str):
+            return env.get(expr)
         elif expr.__class__ == Tuple:
             return expr
         elif expr.__class__ == list:

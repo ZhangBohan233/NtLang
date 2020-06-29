@@ -11,24 +11,24 @@ def read_file(file_name, parent_path) -> str:
 
 
 def parse(source: str) -> list:
-    tokens = ["("] + re.split("(\s|\(|\))", source) + [")"]
+    tokens = ["("] + re.split("(\s|(?<!;)\(|;\(|\)|\[|\])", source) + [")"]
     stack = []
-    comment = False
     try:
         for tk in tokens:
             if len(tk) > 0:
-                if tk == "(":
+                if tk == "(" or tk == "[":
                     stack.append([])
-                elif tk == ")":
+                elif tk == ")" or tk == "]":
                     if len(stack) < 2:
                         break
                     stack[-2].append(stack.pop())
+                elif tk == ";(":
+                    stack.append(Tuple())
                 elif tk not in OMITTED:
                     stack[-1].append(tk)
     except IndexError as e:
         print(stack)
         raise e
-
     return stack[0]
 
 
@@ -123,6 +123,17 @@ class Boolean:
         return self.__str__()
 
 
+class Null:
+    def __init__(self):
+        pass
+
+    def __str__(self):
+        return "null"
+
+    def __repr__(self):
+        return self.__str__()
+
+
 class Struct:
     def __init__(self, name, parent_struct, members: list):
         self.name = name
@@ -160,8 +171,20 @@ class StructObj:
         self.attrs: dict = attrs
 
 
+class Tuple(list):
+    def __init__(self):
+        super().__init__()
+
+    def __str__(self):
+        return ";" + super().__str__()
+
+    def __repr__(self):
+        return super().__repr__()
+
+
 TRUE = Boolean(True)
 FALSE = Boolean(False)
+NULL = Null()
 
 
 def boolean(value: bool) -> Boolean:
@@ -172,8 +195,8 @@ def is_fn(f) -> Boolean:
     return boolean(callable(f) or isinstance(f, Function))
 
 
-def error(exception: Exception):
-    raise exception
+def error(error_str: str):
+    raise Error(error_str)
 
 
 def make_struct(name: str, parent, content: list, env: Env):
@@ -186,7 +209,7 @@ def make_struct(name: str, parent, content: list, env: Env):
     def getter_fn(param_name):
         return lambda obj: \
             obj.attrs[param_name] \
-            if isinstance(obj, StructObj) else error(Error("Struct '" + name + "' expected, got a " + str(obj)))
+            if isinstance(obj, StructObj) else error("Struct '" + name + "' expected, got a " + str(obj))
 
     for param in content:
         if not isinstance(param, str) or param in INVALID_NAME:
@@ -208,9 +231,12 @@ def make_struct(name: str, parent, content: list, env: Env):
 def put_builtins(env: Env):
     env.put("+", lambda a, b: a + b)
     env.put("<", lambda a, b: boolean(a < b))
+    env.put("boolean?", lambda b: boolean(b is TRUE or b is FALSE))
     env.put("int", lambda x: int(x))
     env.put("int?", lambda x: boolean(isinstance(x, int)))
     env.put("fn?", is_fn)
+    env.put("null?", lambda n: n is NULL)
+    env.put("tuple?", lambda t: boolean(isinstance(t, Tuple)))
 
 
 class NtFileInterpreter:
@@ -236,7 +262,7 @@ class NtFileInterpreter:
         if env is None:
             env = Env(None)
             put_builtins(env)
-        res = None
+        res = NULL
         i = 0
         while i < len(program):
             expr = program[i]
@@ -262,6 +288,8 @@ class NtFileInterpreter:
                 return FALSE
             else:
                 return env.get(expr)
+        elif isinstance(expr, Tuple):
+            return expr
         elif isinstance(expr, list):
             if len(expr) > 0:
                 first = expr[0]
@@ -275,6 +303,29 @@ class NtFileInterpreter:
                             env.put(name, value)
                     else:
                         raise Error("Definition must have 3 parts: (def name value).")
+                elif first == "if":
+                    if len(expr) == 4:
+                        cond = self.evaluate(expr[1], env)
+                        if cond is TRUE:
+                            return self.evaluate(expr[2], env)
+                        elif cond is FALSE:
+                            return self.evaluate(expr[3], env)
+                        else:
+                            raise Error("Condition of if-expression must returns a boolean.")
+                    else:
+                        raise Error("If statement must have 4 parts: (if condition then else)")
+                elif first == "cond":
+                    for line in expr[1:]:
+                        if isinstance(line, list) and len(line) == 2:
+                            if line[0] == "else":
+                                return self.evaluate(line[1], env)
+                            else:
+                                cond = self.evaluate(line[0], env)
+                                if cond is TRUE:
+                                    return self.evaluate(line[1], env)
+                        else:
+                            raise Error("Condition in cond expression must have two parts: "
+                                        "[condition body] | [else body], got '" + str(line) + "'.")
                 elif first == "fn":
                     if len(expr) == 3:
                         return Function(expr[1], expr[2], env)
@@ -344,6 +395,8 @@ class NtFileInterpreter:
                     else:
                         raise Error("Expression " + str(func) + " is not callable.")
 
+        return NULL
+
 
 # helper functions
 
@@ -361,6 +414,10 @@ def is_float(s: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def parse_args(arg_list: list):
+    pass
 
 
 test = """

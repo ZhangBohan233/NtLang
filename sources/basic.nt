@@ -1,3 +1,5 @@
+(require lang)
+
 (def a 1)
 
 (def add (fn (m) (fn (a) (+ m a))))
@@ -11,5 +13,7 @@
 
 (def dd (point 1 2))
 (def ee (point3d 1 2 3))
-# (point3d? ee)
-:(point3d.z ee)
+
+(def tup ;(1 2 3))
+
+: (tuple? tup)

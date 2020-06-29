@@ -1,0 +1,6 @@
+(def a 1)
+
+(def a (fn (x y) (+ x y)))
+
+(cond
+  [])

@@ -1,0 +1,4 @@
+(require lang)
+(require "basic.nt")
+
+: (fn? add)

@@ -1,0 +1,15 @@
+(def a 1)
+
+(def add (fn (m) (fn (a) (+ m a))))
+(con add (int? -> fn?))
+
+(def foo (fn () 3))
+(con foo (-> int?))
+
+(struct point (x y))
+(struct point3d point (z))
+
+(def dd (point 1 2))
+(def ee (point3d 1 2 3))
+# (point3d? ee)
+:(point3d.z ee)

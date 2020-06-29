@@ -14,19 +14,26 @@ def parse(source: str) -> list:
     tokens = ["("] + re.split("(\s|(?<!;)\(|;\(|\)|\[|\])", source) + [")"]
     # print(tokens)
     stack = []
+    comment = False
     try:
         for tk in tokens:
             if len(tk) > 0:
-                if tk == "(" or tk == "[":
-                    stack.append([])
-                elif tk == ")" or tk == "]":
-                    if len(stack) < 2:
-                        break
-                    stack[-2].append(stack.pop())
-                elif tk == ";(":
-                    stack.append(Tuple())
-                elif tk not in OMITTED:
-                    stack[-1].append(tk)
+                if tk == "#":
+                    comment = True
+                elif tk == "\n":
+                    comment = False
+
+                if not comment:
+                    if tk == "(" or tk == "[":
+                        stack.append([])
+                    elif tk == ")" or tk == "]":
+                        if len(stack) < 2:
+                            break
+                        stack[-2].append(stack.pop())
+                    elif tk == ";(":
+                        stack.append(Tuple())
+                    elif tk not in OMITTED:
+                        stack[-1].append(tk)
     except IndexError as e:
         print(stack)
         raise e
@@ -308,7 +315,7 @@ class NtFileInterpreter:
         try:
             while i < len(program):
                 expr = program[i]
-                if expr == "#":  # comment next expr
+                if expr == "##":  # comment next expr
                     i += 2
                     continue
                 if is_main and expr == ":":  # next expr is the main expr
@@ -484,27 +491,9 @@ test = """
 """
 
 
-class LN:
-    def __init__(self, head, tail):
-        self.head = head
-        self.tail = tail
-
-    def __str__(self):
-        return str(self.head) + "->" + str(self.tail)
-
-
-def make_ln(lst, i):
-    if i <= len(lst) - 1:
-        return LN(lst[i], make_ln(lst, i + 1))
-    else:
-        return None
-
-
 if __name__ == '__main__':
     import sys
     import os
-
-    # print(make_ln([1, 2, 3], 0))
 
     if len(sys.argv) > 1:
         src_file = sys.argv[1]

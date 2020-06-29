@@ -1,4 +1,13 @@
+
+#
+# A list struct
+# Implemented in linked-list data structure.
+#
 (struct list (head tail))
+
+(def list.listOrNull? (fn (lst) (or (list? lst) (null? lst))))
+
+(con list (any list.listOrNull? -> list?))
 
 (def list._make (fn (tup i)
     (if (<= (+ i 1) (tuple.length tup))
@@ -8,12 +17,12 @@
 (def list.make (fn (tup)
     (list._make tup 0)))
 
-(con list.make (tuple? -> (fn (ll) (or (list? ll) (null? ll)))))
+(con list.make (tuple? -> list.listOrNull?))
 
 (def list.get (fn (lst index)
-    (if (== x 0)
+    (if (== index 0)
         (list.head lst)
-        (list.get (lst.tail lst) (+ index 1)))))
+        (list.get (list.tail lst) (- index 1)))))
 
 (con list.get (list? int? -> any))
 
@@ -22,4 +31,14 @@
         0
         (+ (list.length (list.tail lst)) 1))))
 
-(con list.length ((fn (ll) (or (list? ll) (null? ll))) -> int?))
+(con list.length (list.listOrNull? -> int?))
+
+(def list._reverse (fn (front tail)
+    (if (null? front)
+        tail
+        (list._reverse (list.tail front) (list (list.head front) tail)))))
+
+(def list.reverse (fn (lst)
+    (list._reverse lst null)))
+
+(con list.reverse (list.listOrNull? -> list.listOrNull?))

@@ -5,6 +5,8 @@
         n
         (+ (fib (- n 1)) (fib (- n 2))))))
 
-(def lst (list.make ;()))
+(def lst (list.make ;(1 2 6 4)))
 
-: (list.length lst)
+(def rev (list.reverse lst))
+
+: (list.get rev 0)

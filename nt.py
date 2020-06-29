@@ -347,9 +347,9 @@ class NtFileInterpreter:
                 return NULL
             else:
                 return env.get(expr)
-        elif isinstance(expr, Tuple):
+        elif expr.__class__ == Tuple:
             return expr
-        elif isinstance(expr, list):
+        elif expr.__class__ == list:
             if len(expr) > 0:
                 first = expr[0]
                 if first == "def":
@@ -375,7 +375,7 @@ class NtFileInterpreter:
                         raise Error("If statement must have 4 parts: (if condition then else)")
                 elif first == "cond":
                     for line in expr[1:]:
-                        if isinstance(line, list) and len(line) == 2:
+                        if line.__class__ == list and len(line) == 2:
                             if line[0] == "else":
                                 return self.evaluate(line[1], env)
                             else:
@@ -385,6 +385,20 @@ class NtFileInterpreter:
                         else:
                             raise Error("Condition in cond expression must have two parts: "
                                         "[condition body] | [else body], got '" + str(line) + "'.")
+                elif first == "let":
+                    if len(expr) == 3:
+                        local_env = Env(env)
+                        for bd in expr[1]:
+                            if bd.__class__ == list and \
+                                    len(bd) == 2 and \
+                                    isinstance(bd[0], str) and \
+                                    bd[0] not in INVALID_NAME:
+                                local_env.put(bd[0], self.evaluate(bd[1], env))
+                            else:
+                                raise Error("Bindings in local binding must be of the form (name expr)")
+                        return self.evaluate(expr[2], local_env)
+                    else:
+                        raise Error("Local binding expr must have 3 parts: (let (bindings*) body)")
                 elif first == "fn":
                     if len(expr) == 3:
                         return Function(expr[1], expr[2], env)

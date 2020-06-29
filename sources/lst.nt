@@ -1,0 +1,10 @@
+(require lang)
+
+(def fib (fn (n)
+    (if (< n 2)
+        n
+        (+ (fib (- n 1)) (fib (- n 2))))))
+
+(def lst (list.make ;()))
+
+: (list.length lst)

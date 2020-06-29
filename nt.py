@@ -12,6 +12,7 @@ def read_file(file_name, parent_path) -> str:
 
 def parse(source: str) -> list:
     tokens = ["("] + re.split("(\s|(?<!;)\(|;\(|\)|\[|\])", source) + [")"]
+    # print(tokens)
     stack = []
     try:
         for tk in tokens:
@@ -29,6 +30,8 @@ def parse(source: str) -> list:
     except IndexError as e:
         print(stack)
         raise e
+
+    # print(stack[0])
     return stack[0]
 
 
@@ -69,7 +72,7 @@ def check_contract(contract, arg, eval_ftn):
         if contract(arg) is not TRUE:
             raise Error("Contract violation.")
     elif isinstance(contract, Function):
-        if contract.call(eval_ftn, arg) is not TRUE:
+        if contract.call(eval_ftn, [arg]) is not TRUE:
             raise Error("Contract violation.")
 
 
@@ -85,7 +88,7 @@ class Function:
     def has_contract(self):
         return self.param_contracts is not None and self.param_contracts is not None
 
-    def call(self, eval_ftn, args):
+    def call(self, eval_ftn, args: list):
         params_count = len(self.params)
         if params_count != len(args):
             raise Error("Arity mismatch. Expected: {}, actual: {}.".format(params_count, len(args)))
@@ -96,6 +99,7 @@ class Function:
             arg = args[i]
             if self.param_contracts is not None:
                 con = self.param_contracts[i]
+                # print(con, arg)
                 check_contract(con, arg, eval_ftn)
             if isinstance(name, str) and name not in INVALID_NAME:
                 call_env.put(name, arg)
@@ -135,25 +139,42 @@ class Null:
 
 
 class Struct:
-    def __init__(self, name, parent_struct, members: list):
+    def __init__(self, name, parent_struct, params: list):
         self.name = name
         self.parent_struct: Struct = parent_struct
-        self.members = members
+        self.params = params
+
+        self.param_contracts = None
 
     def _get_all_params(self) -> list:
         if self.parent_struct:
-            return self.parent_struct._get_all_params() + self.members
+            return self.parent_struct._get_all_params() + self.params
         else:
-            return self.members
+            return self.params
 
-    def create_instance(self, args: list):
+    def _default_contract(self, env: Env):
+        any_ftn = env.get("any")
+        return [any_ftn for _ in range(len(self.params))]
+
+    def _get_all_contracts(self, env: Env) -> list:
+        if self.parent_struct:
+            return self.parent_struct._get_all_contracts(env) + \
+                   (self.param_contracts if self.param_contracts else self._default_contract(env))
+        else:
+            return self.param_contracts if self.param_contracts else self._default_contract(env)
+
+    def create_instance(self, eval_ftn, env: Env, args: list):
         params = self._get_all_params()
         if len(params) != len(args):
             raise Error("Struct initialization must have equal number of arguments with all members of the struct.")
 
+        param_contracts = self._get_all_contracts(env)
         attrs = {}
         for i in range(len(params)):
-            attrs[params[i]] = args[i]
+            arg = args[i]
+            con = param_contracts[i]
+            check_contract(con, arg, eval_ftn)
+            attrs[params[i]] = arg
 
         return StructObj(self, attrs)
 
@@ -167,8 +188,11 @@ class Struct:
 
 class StructObj:
     def __init__(self, struct: Struct, attrs):
-        self.struct = struct
+        self.struct: Struct = struct
         self.attrs: dict = attrs
+
+    def __str__(self):
+        return "struct<{}>".format(self.struct.name)
 
 
 class Tuple(list):
@@ -179,7 +203,7 @@ class Tuple(list):
         return ";" + super().__str__()
 
     def __repr__(self):
-        return super().__repr__()
+        return "tuple" + super().__repr__()
 
 
 TRUE = Boolean(True)
@@ -230,19 +254,36 @@ def make_struct(name: str, parent, content: list, env: Env):
 
 def put_builtins(env: Env):
     env.put("+", lambda a, b: a + b)
+    env.put("-", lambda a, b: a - b)
+    env.put("*", lambda a, b: a * b)
+    env.put("/", lambda a, b: a / b)
+    env.put("%", lambda a, b: a % b)
     env.put("<", lambda a, b: boolean(a < b))
+    env.put("<=", lambda a, b: boolean(a <= b))
+    env.put(">", lambda a, b: boolean(a > b))
+    env.put(">=", lambda a, b: boolean(a >= b))
+    env.put("==", lambda a, b: boolean(a == b))
+    env.put("and", lambda a, b: boolean(a and b))
+    env.put("any", lambda x: TRUE)
     env.put("boolean?", lambda b: boolean(b is TRUE or b is FALSE))
+    env.put("float", lambda x: float(x))
+    env.put("float?", lambda x: boolean(isinstance(x, float)))
     env.put("int", lambda x: int(x))
     env.put("int?", lambda x: boolean(isinstance(x, int)))
     env.put("fn?", is_fn)
-    env.put("null?", lambda n: n is NULL)
+    env.put("null?", lambda n: boolean(n is NULL))
+    env.put("or", lambda a, b: boolean(a or b))
     env.put("tuple?", lambda t: boolean(isinstance(t, Tuple)))
+    env.put("tuple.get", lambda t, i: t[i])
+    env.put("tuple.length", lambda t: len(t))
 
 
 class NtFileInterpreter:
     def __init__(self, file_path):
         self.file_path = os.path.abspath(file_path)
         self.parent_dir = os.path.dirname(self.file_path)
+
+        self.traceback = []
 
     def get_import_path(self, name):
         if (name[0] == '"' and name[-1] == '"') or (name[0] == "'" and name[-1] == "'"):  # user's lib
@@ -264,19 +305,28 @@ class NtFileInterpreter:
             put_builtins(env)
         res = NULL
         i = 0
-        while i < len(program):
-            expr = program[i]
-            if expr == "#":  # comment next expr
-                i += 2
-                continue
-            if is_main and expr == ":":  # next expr is the main expr
-                res = self.evaluate(program[i + 1], env)
-                break
-            self.evaluate(expr, env)
-            i += 1
-        return res
+        try:
+            while i < len(program):
+                expr = program[i]
+                if expr == "#":  # comment next expr
+                    i += 2
+                    continue
+                if is_main and expr == ":":  # next expr is the main expr
+                    res = self.evaluate(program[i + 1], env)
+                    break
+                self.evaluate(expr, env)
+                i += 1
+                self.traceback.clear()
+
+            return res
+        except Exception as e:
+            print("Nt traceback:")
+            for tb in self.traceback:
+                print(tb)
+            raise e
 
     def evaluate(self, expr, env: Env):
+        self.traceback.append(expr)
         if isinstance(expr, str):
             if is_int(expr):
                 return int(expr)
@@ -286,6 +336,8 @@ class NtFileInterpreter:
                 return TRUE
             elif expr == "false":
                 return FALSE
+            elif expr == "null":
+                return NULL
             else:
                 return env.get(expr)
         elif isinstance(expr, Tuple):
@@ -335,8 +387,11 @@ class NtFileInterpreter:
                     if len(expr) == 3:
                         name = expr[1]
                         ftn = env.get(name)
-                        if not isinstance(ftn, Function):
-                            raise Error("Target of contract definition must be a function.")
+                        is_struct = False
+                        if isinstance(ftn, Struct):
+                            is_struct = True
+                        elif not isinstance(ftn, Function):
+                            raise Error("Target of contract definition must be a function or a struct.")
                         contracts = expr[2]
                         if len(contracts) > 1 and contracts[-2] == "->":
                             param_cons = contracts[:-2]
@@ -353,7 +408,8 @@ class NtFileInterpreter:
                             eval_rtn_con = self.evaluate(rtn_con, env)
                             if is_fn(eval_rtn_con):
                                 ftn.param_contracts = eval_param_cons
-                                ftn.rtn_contract = eval_rtn_con
+                                if not is_struct:
+                                    ftn.rtn_contract = eval_rtn_con
                             else:
                                 raise Error("Contract must be a boolean-valued function.")
                         else:
@@ -391,7 +447,7 @@ class NtFileInterpreter:
                     elif isinstance(func, Function):
                         return func.call(self.evaluate, args)
                     elif isinstance(func, Struct):
-                        return func.create_instance(args)
+                        return func.create_instance(self.evaluate, env, args)
                     else:
                         raise Error("Expression " + str(func) + " is not callable.")
 
@@ -427,9 +483,28 @@ test = """
 :(+ a (+ 2 (f 3)))
 """
 
+
+class LN:
+    def __init__(self, head, tail):
+        self.head = head
+        self.tail = tail
+
+    def __str__(self):
+        return str(self.head) + "->" + str(self.tail)
+
+
+def make_ln(lst, i):
+    if i <= len(lst) - 1:
+        return LN(lst[i], make_ln(lst, i + 1))
+    else:
+        return None
+
+
 if __name__ == '__main__':
     import sys
     import os
+
+    # print(make_ln([1, 2, 3], 0))
 
     if len(sys.argv) > 1:
         src_file = sys.argv[1]

@@ -1,0 +1,5 @@
+(def add (fn (a b) (+ a b)))
+
+(con add (int? (fn (x) (int? x)) -> int?))
+
+:(add 1 2)

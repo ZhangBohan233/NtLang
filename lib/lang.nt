@@ -1,0 +1,25 @@
+(struct list (head tail))
+
+(def list._make (fn (tup i)
+    (if (<= (+ i 1) (tuple.length tup))
+        (list (tuple.get tup i) (list._make tup (+ i 1)))
+        null)))
+
+(def list.make (fn (tup)
+    (list._make tup 0)))
+
+(con list.make (tuple? -> (fn (ll) (or (list? ll) (null? ll)))))
+
+(def list.get (fn (lst index)
+    (if (== x 0)
+        (list.head lst)
+        (list.get (lst.tail lst) (+ index 1)))))
+
+(con list.get (list? int? -> any))
+
+(def list.length (fn (lst)
+    (if (null? lst)
+        0
+        (+ (list.length (list.tail lst)) 1))))
+
+(con list.length ((fn (ll) (or (list? ll) (null? ll))) -> int?))

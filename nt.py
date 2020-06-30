@@ -4,6 +4,9 @@ OMITTED = {"\n", "\t", " "}
 INVALID_NAME = {"(", ")"}.union(OMITTED)
 
 
+PREF_DICT = {"tk": True, "ast": False}
+
+
 def read_file(file_name, parent_path) -> str:
     full_path = parent_path + os.sep + file_name
     with open(full_path, "r") as rf:
@@ -11,10 +14,14 @@ def read_file(file_name, parent_path) -> str:
 
 
 def parse(source: str) -> list:
-    tokens = ["("] + re.split("(\s|(?<!')\(|'\(|\)|\[|\])", source) + [")"]
-    # print(tokens)
+    tokens = ["("] + re.split("(\s|\".*?\"|(?<!')\(|'\(|\)|\[|\])", source) + [")"]
+
+    if PREF_DICT["tk"]:
+        print(tokens)
+
     stack = []
     comment = False
+    tup_depth = 0
     try:
         for tk in tokens:
             if len(tk) > 0:
@@ -28,19 +35,33 @@ def parse(source: str) -> list:
                         stack[-1].append(int(tk))
                     elif is_float(tk):
                         stack[-1].append(float(tk))
+                    elif is_str(tk):
+                        stack[-1].append(String(tk[1:-1]))
                     elif tk == "true":
                         stack[-1].append(TRUE)
                     elif tk == "false":
                         stack[-1].append(FALSE)
                     elif tk == "null":
                         stack[-1].append(NULL)
-                    elif tk == "(" or tk == "[":
+                    elif tk == "(":
+                        if tup_depth > 0:
+                            stack.append(Tuple())
+                            tup_depth += 1
+                        else:
+                            stack.append([])
+                    elif tk == "[":
                         stack.append([])
-                    elif tk == ")" or tk == "]":
+                    elif tk == ")":
                         if len(stack) < 2:
                             break
+                        active = stack.pop()
+                        if active.__class__ == Tuple:
+                            tup_depth -= 1
+                        stack[-1].append(active)
+                    elif tk == "]":
                         stack[-2].append(stack.pop())
                     elif tk == "'(":
+                        tup_depth += 1
                         stack.append(Tuple())
                     elif tk not in OMITTED:
                         stack[-1].append(tk)
@@ -48,7 +69,9 @@ def parse(source: str) -> list:
         print(stack)
         raise e
 
-    # print(stack[0])
+    if PREF_DICT["ast"]:
+        print(stack[0])
+
     return stack[0]
 
 
@@ -87,10 +110,10 @@ class Env:
 def check_contract(contract, arg, eval_ftn):
     if callable(contract):
         if contract(arg) is not TRUE:
-            raise Error("Contract violation.")
+            raise Error("Contract violation, got a " + str(arg))
     elif isinstance(contract, Function):
         if contract.call(eval_ftn, [arg]) is not TRUE:
-            raise Error("Contract violation.")
+            raise Error("Contract violation, got a " + str(arg))
 
 
 class Function:
@@ -229,6 +252,9 @@ class Struct:
             return self.is_child_of_this(struct.parent_struct)
         return False
 
+    def __str__(self):
+        return "Struct-def<" + self.name + ">"
+
 
 class StructObj:
     def __init__(self, struct: Struct, attrs):
@@ -250,12 +276,23 @@ class Tuple(list):
         return "tuple" + super().__repr__()
 
 
+class String:
+    def __init__(self, s):
+        self.s: str = s
+
+    def __str__(self):
+        return '"' + self.s + '"'
+
+    def __add__(self, other):
+        return String(self.s + other.s) if isinstance(other, String) else error("String concat must take two strings")
+
+
 TRUE = Boolean(True)
 FALSE = Boolean(False)
 NULL = Null()
 
 
-DIRECT_RETURN_TYPES = {int, float, Boolean, Null}
+DIRECT_RETURN_TYPES = {int, float, Boolean, Null, String}
 
 
 def boolean(value: bool) -> Boolean:
@@ -266,7 +303,7 @@ def is_fn(f) -> Boolean:
     return boolean(callable(f) or isinstance(f, Function))
 
 
-def nt_apply(eval_ftn, env: Env):
+def make_nt_apply(eval_ftn, env: Env):
     def apply(ftn, lst):
         if callable(ftn):
             if isinstance(lst, StructObj) and lst.struct.name == "list":
@@ -283,6 +320,23 @@ def nt_apply(eval_ftn, env: Env):
         else:
             raise Error("Apply takes either a builtin function or a user-defined function as first argument.")
     return apply
+
+
+def make_to_str_ftn(eval_ftn, env: Env):
+    def to_str_fn(obj):
+        if isinstance(obj, StructObj):
+            str_fn_name = obj.struct.name + ".str"
+            str_fn = env.get(str_fn_name)
+            if callable(str_fn):
+                return str_fn(obj)
+            elif isinstance(str_fn, Function):
+                return str_fn.call(eval_ftn, [obj])
+            else:
+                raise Error("struct.str must be a unary function")
+        else:
+            return String(str(obj))
+
+    return to_str_fn
 
 
 def error(error_str: str):
@@ -310,12 +364,17 @@ def make_struct(name: str, parent, content: list, env: Env):
     struct = Struct(name, parent_struct, content)
 
     env.put(name, struct)
-    env.put(name + "?",
+    env.put(name + "?",  # checker function
             lambda obj: boolean(struct.is_child_of_this(obj.struct)) if isinstance(obj, StructObj) else FALSE)
+    env.put(name + ".str", lambda s: String(str(s)))  # default to string function
     for getter_name in getters:
         env.put(getter_name, getters[getter_name])
 
     return struct
+
+
+def foldl_n():
+    pass
 
 
 def put_builtins(env: Env, main_eval_ftn):
@@ -331,7 +390,7 @@ def put_builtins(env: Env, main_eval_ftn):
     env.put("==", lambda a, b: boolean(a == b))
     env.put("and", lambda *args: boolean(all(args)))
     env.put("any", lambda x: TRUE)
-    env.put("apply", nt_apply(main_eval_ftn, env))
+    env.put("apply", make_nt_apply(main_eval_ftn, env))
     env.put("boolean?", lambda b: boolean(b is TRUE or b is FALSE))
     env.put("float", lambda x: float(x))
     env.put("float?", lambda x: boolean(isinstance(x, float)))
@@ -340,6 +399,9 @@ def put_builtins(env: Env, main_eval_ftn):
     env.put("fn?", is_fn)
     env.put("null?", lambda n: boolean(n is NULL))
     env.put("or", lambda *args: boolean(any(args)))
+    env.put("str", make_to_str_ftn(main_eval_ftn, env))
+    env.put("str?", lambda s: boolean(isinstance(s, String)))
+    env.put("struct?", lambda s: boolean(isinstance(s, Struct)))
     env.put("tuple?", lambda t: boolean(isinstance(t, Tuple)))
     env.put("tuple.get", lambda t, i: t[i])
     env.put("tuple.length", lambda t: len(t))
@@ -360,7 +422,7 @@ class NtFileInterpreter:
         :param name:
         :return:
         """
-        if (name[0] == '"' and name[-1] == '"') or (name[0] == "'" and name[-1] == "'"):  # user's lib
+        if is_str(name):  # user's lib
             pure_name = name[1:-1]
             if os.path.isabs(pure_name):
                 pass
@@ -570,6 +632,11 @@ def is_float(s: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def is_str(s: str) -> bool:
+    return len(s) >= 2 and \
+           (s[0] == '"' and s[-1] == '"')
 
 
 def parse_args(arg_list: list):

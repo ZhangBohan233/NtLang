@@ -1,7 +1,14 @@
-(require lang)
 
 (def f (fn (x) (+ x x)))
 
-(def m (map f (list.make '(1 2))))
+(def g (fn (x y) (+ x y)))
 
-: (list.get m 0)
+(def m (map f '(1 2)))
+
+(def fd (foldl list null '(1 2 3 4)))
+
+# (def ff (foldl g 0 '(1 2)))
+
+# (def gg '(1 (2 3) 4))
+
+: (str fd)

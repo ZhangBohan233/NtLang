@@ -1,23 +1,4 @@
-(require lang)
+(def x '(5 (6 8) 7))
+(def r 'a)
 
-(def a 1)
-
-(def add (fn (m) (fn (a) (+ m a))))
-(con add (int? -> fn?))
-
-(def foo (fn (x) 3))
-(con foo (any -> int?))
-
-(struct point (x y))
-(struct point3d point (z))
-
-(con point (int? int? -> point?))
-
-(def dd (point 1 1))
-(def ee (point3d 1 2 3))
-
-(def tup '(1 2 3))
-
-(def lst (list '(3 2 4)))
-
-: lst
+: (cons 'a (cons 1))

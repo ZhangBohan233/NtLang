@@ -4,7 +4,7 @@ OMITTED = {"\n", "\t", " "}
 INVALID_NAME = {"(", ")"}.union(OMITTED)
 
 
-PREF_DICT = {"tk": True, "ast": False}
+PREF_DICT = {"tk": True, "ast": True, "nl": True}
 
 
 def read_file(file_name, parent_path) -> str:
@@ -15,7 +15,7 @@ def read_file(file_name, parent_path) -> str:
 
 def parse(source: str) -> list:
     tokens = ["("] + \
-             [p for p in re.split("(\s|\".*?\"|(?<!')\(|'\(|\)|\[|\])", source) if p.strip() or p == "\n"] + \
+             [p for p in re.split("(\s|\".*?\"|'\(|\(|'|\)|\[|\])", source) if p.strip() or p == "\n"] + \
              [")"]
 
     if PREF_DICT["tk"]:
@@ -23,50 +23,59 @@ def parse(source: str) -> list:
 
     stack = []
     comment = False
-    tup_depth = 0
+    par_count = 0
+    quote_stack = []
     try:
-        for tk in tokens:
-            if len(tk) > 0:
-                if tk == "#":
-                    comment = True
-                elif tk == "\n":
-                    comment = False
+        i = 0
+        while i < len(tokens):
+            tk = tokens[i]
+            if tk == "#":
+                comment = True
+            elif tk == "\n":
+                comment = False
 
-                if not comment:
-                    if is_int(tk):
-                        stack[-1].append(int(tk))
-                    elif is_float(tk):
-                        stack[-1].append(float(tk))
-                    elif is_str(tk):
-                        stack[-1].append(String(tk[1:-1]))
-                    elif tk == "true":
-                        stack[-1].append(TRUE)
-                    elif tk == "false":
-                        stack[-1].append(FALSE)
-                    elif tk == "null":
-                        stack[-1].append(NULL)
-                    elif tk == "(":
-                        if tup_depth > 0:
-                            stack.append(Tuple())
-                            tup_depth += 1
-                        else:
-                            stack.append([])
-                    elif tk == "[":
-                        stack.append([])
-                    elif tk == ")":
-                        if len(stack) < 2:
-                            break
-                        active = stack.pop()
-                        if active.__class__ == Tuple:
-                            tup_depth -= 1
-                        stack[-1].append(active)
-                    elif tk == "]":
+            if not comment:
+                if is_int(tk):
+                    stack[-1].append(int(tk))
+                elif is_float(tk):
+                    stack[-1].append(float(tk))
+                elif is_str(tk):
+                    stack[-1].append(String(tk[1:-1]))
+                elif tk == "'":
+                    quote = ["quote", tokens[i + 1]]
+                    i += 1
+                    stack[-1].append(quote)
+                elif tk == "true":
+                    stack[-1].append(TRUE)
+                elif tk == "false":
+                    stack[-1].append(FALSE)
+                elif tk == "null":
+                    stack[-1].append(NULL)
+                elif tk == "(":
+                    par_count += 1
+                    stack.append([])
+                elif tk == "[":
+                    stack.append([])
+                elif tk == ")":
+                    if len(stack) < 2:
+                        break
+                    if len(quote_stack) > 0 and quote_stack[-1] == par_count:
+                        quote_stack.pop()
                         stack[-2].append(stack.pop())
-                    elif tk == "'(":
-                        tup_depth += 1
-                        stack.append(Tuple())
-                    elif tk not in OMITTED:
-                        stack[-1].append(tk)
+                        # par_count -= 1
+                    active = stack.pop()
+                    stack[-1].append(active)
+                    par_count -= 1
+                elif tk == "]":
+                    stack[-2].append(stack.pop())
+                elif tk == "'(":
+                    par_count += 1
+                    quote_stack.append(par_count)
+                    stack.append(["quote"])
+                    stack.append([])
+                elif tk not in OMITTED:
+                    stack[-1].append(tk)
+            i += 1
     except IndexError as e:
         print(stack)
         raise e
@@ -289,6 +298,29 @@ class String:
         return String(self.s + other.s) if isinstance(other, String) else error("String concat must take two strings")
 
 
+class Quote:
+    def __init__(self, content):
+        self.content = content
+
+    def __str__(self):
+        return "'" + str(self.content)
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class Pair:
+    def __init__(self, head, tail):
+        self.head = head
+        self.tail = tail
+
+    def __str__(self):
+        if is_pair(self.tail):
+            return "(cons {} {})".format(self.head, self.tail)
+        else:
+            return "(cons {} . {})".format(self.head, self.tail)
+
+
 TRUE = Boolean(True)
 FALSE = Boolean(False)
 NULL = Null()
@@ -345,6 +377,24 @@ def error(error_str: str):
     raise Error(error_str)
 
 
+def make_pair(lst, i):
+    if i <= len(lst) - 1:
+        return Pair(make_quote(lst[i]), make_pair(lst, i + 1))
+    else:
+        return NULL
+
+
+def make_quote(quote):
+    if isinstance(quote, list):
+        return make_pair(quote, 0)
+    else:
+        return Quote(quote)
+
+
+def cons(head, tail=NULL):
+    return Pair(head, tail)
+
+
 def make_struct(name: str, parent, content: list, env: Env):
     parent_struct = env.get(parent) if parent else None
     if env.has_name(name):
@@ -375,6 +425,14 @@ def make_struct(name: str, parent, content: list, env: Env):
     return struct
 
 
+def atom(x):
+    return boolean(not isinstance(x, list) or len(x) == 0)
+
+
+def is_pair(lst):
+    return isinstance(lst, Pair) or lst is NULL
+
+
 def foldl_n():
     pass
 
@@ -393,14 +451,22 @@ def put_builtins(env: Env, main_eval_ftn):
     env.put("and", lambda *args: boolean(all(args)))
     env.put("any", lambda x: TRUE)
     env.put("apply", make_nt_apply(main_eval_ftn, env))
+    env.put("atom?", atom)
     env.put("boolean?", lambda b: boolean(b is TRUE or b is FALSE))
+    env.put("car", lambda lst: lst.head if is_pair(lst) else error("Function car takes a pair as argument, '{}' given."
+                                                                   .format(lst)))
+    env.put("cdr", lambda lst: lst.tail if is_pair(lst) else error("Function cdr takes a pair as argument, '{}' given."
+                                                                   .format(lst)))
+    env.put("cons", cons)
+    env.put("eq?", lambda a, b: a is b)
     env.put("float", lambda x: float(x))
     env.put("float?", lambda x: boolean(isinstance(x, float)))
+    env.put("fn?", is_fn)
     env.put("int", lambda x: int(x))
     env.put("int?", lambda x: boolean(isinstance(x, int)))
-    env.put("fn?", is_fn)
     env.put("null?", lambda n: boolean(n is NULL))
     env.put("or", lambda *args: boolean(any(args)))
+    env.put("pair", lambda p: boolean(is_pair(p)))
     env.put("str", make_to_str_ftn(main_eval_ftn, env))
     env.put("str?", lambda s: boolean(isinstance(s, String)))
     env.put("struct?", lambda s: boolean(isinstance(s, Struct)))
@@ -442,7 +508,8 @@ class NtFileInterpreter:
             env = Env(None)
             put_builtins(env, self.evaluate)
 
-        self.evaluate(["require", "lang"], env)
+        if not PREF_DICT["nl"]:
+            self.evaluate(["require", "lang"], env)
 
         res = NULL
         i = 0
@@ -477,7 +544,12 @@ class NtFileInterpreter:
         elif expr.__class__ == list:
             if len(expr) > 0:
                 first = expr[0]
-                if first == "def":
+                if first == "quote":
+                    if len(expr) == 2:
+                        return make_quote(expr[1])
+                    else:
+                        raise Error("Quote expr must have two parts: (quote expr)")
+                elif first == "def":
                     if len(expr) == 3:
                         name = expr[1]
                         if name in INVALID_NAME:

@@ -14,7 +14,9 @@ def read_file(file_name, parent_path) -> str:
 
 
 def parse(source: str) -> list:
-    tokens = ["("] + re.split("(\s|\".*?\"|(?<!')\(|'\(|\)|\[|\])", source) + [")"]
+    tokens = ["("] + \
+             [p for p in re.split("(\s|\".*?\"|(?<!')\(|'\(|\)|\[|\])", source) if p.strip() or p == "\n"] + \
+             [")"]
 
     if PREF_DICT["tk"]:
         print(tokens)

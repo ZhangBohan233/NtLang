@@ -408,7 +408,7 @@ def make_struct(name: str, parent, content: list, env: Env):
     return struct
 
 
-# builtin functions
+# builtin functions and their helper functions
 
 
 def atom(x):
@@ -423,6 +423,21 @@ def is_pair(lst):
     return isinstance(lst, Pair) or lst is NULL
 
 
+def _head_of_pair_list(arg_list: list):
+    if arg_list[0] is NULL:  # reach the end of every pairs
+        if any([x is not NULL for x in arg_list]):
+            raise Error("All lists to function map must have equal lengths.")
+        return None
+
+    cur_heads = []
+    for i in range(len(arg_list)):
+        p: Pair = arg_list[i]
+        cur_heads.append(p.head)
+        arg_list[i] = p.tail
+
+    return cur_heads
+
+
 def make_map(eval_ftn):
 
     def fn(ftn, *lists):
@@ -433,16 +448,9 @@ def make_map(eval_ftn):
 
         arg_list = list(lists)
         while True:
-            if arg_list[0] is NULL:  # reach the end of
-                if any([x is not NULL for x in arg_list]):
-                    raise Error("All lists to function map must have equal lengths.")
+            cur_heads = _head_of_pair_list(arg_list)
+            if cur_heads is None:
                 break
-
-            cur_heads = []
-            for i in range(lst_count):
-                p: Pair = arg_list[i]
-                cur_heads.append(p.head)
-                arg_list[i] = p.tail
 
             if callable(ftn):
                 res.append(ftn(*cur_heads))
@@ -466,16 +474,9 @@ def make_foldl(eval_ftn):
 
         arg_list = list(lists)
         while True:
-            if arg_list[0] is NULL:  # reach the end of
-                if any([x is not NULL for x in arg_list]):
-                    raise Error("All lists to function map must have equal lengths.")
+            cur_heads = _head_of_pair_list(arg_list)
+            if cur_heads is None:
                 break
-
-            cur_heads = []
-            for i in range(lst_count):
-                p: Pair = arg_list[i]
-                cur_heads.append(p.head)
-                arg_list[i] = p.tail
 
             if callable(ftn):
                 res = ftn(*cur_heads, res)

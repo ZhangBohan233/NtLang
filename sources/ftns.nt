@@ -3,12 +3,14 @@
 
 (def g (fn (x y) (+ x y)))
 
-(def m (map f '(1 2)))
+(def m (map f '(1 2 3)))
 
-(def fd (foldl list null '(1 2 3 4)))
+(def n (map g '(1 2) '(3 4)))
 
-# (def ff (foldl g 0 '(1 2)))
+(def fd (foldl cons null '(1 2 3 4)))
 
-# (def gg '(1 (2 3) 4))
+(def ff (foldl g 0 '(1 2)))
 
-: (str fd)
+; (def gg '(1 (2 3) 4))
+
+: (str ff)

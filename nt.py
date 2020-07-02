@@ -3,7 +3,6 @@ import re
 OMITTED = {"\n", "\t", " "}
 INVALID_NAME = {"(", ")"}.union(OMITTED)
 
-
 PREF_DICT = {"tk": True, "ast": True, "nl": True}
 
 
@@ -15,66 +14,61 @@ def read_file(file_name, parent_path) -> str:
 
 def parse(source: str) -> list:
     tokens = ["("] + \
-             [p for p in re.split("(\s|\".*?\"|'\(|\(|'|\)|\[|\])", source) if p.strip() or p == "\n"] + \
+             [p for p in re.split("(\s|\".*?\"|;.*?\n|'\(|\(|'|\)|\[|\])", source) if p.strip()] + \
              [")"]
 
     if PREF_DICT["tk"]:
         print(tokens)
 
     stack = []
-    comment = False
     par_count = 0
     quote_stack = []
     try:
         i = 0
         while i < len(tokens):
             tk = tokens[i]
-            if tk == "#":
-                comment = True
-            elif tk == "\n":
-                comment = False
-
-            if not comment:
-                if is_int(tk):
-                    stack[-1].append(int(tk))
-                elif is_float(tk):
-                    stack[-1].append(float(tk))
-                elif is_str(tk):
-                    stack[-1].append(String(tk[1:-1]))
-                elif tk == "'":
-                    quote = ["quote", tokens[i + 1]]
-                    i += 1
-                    stack[-1].append(quote)
-                elif tk == "true":
-                    stack[-1].append(TRUE)
-                elif tk == "false":
-                    stack[-1].append(FALSE)
-                elif tk == "null":
-                    stack[-1].append(NULL)
-                elif tk == "(":
-                    par_count += 1
-                    stack.append([])
-                elif tk == "[":
-                    stack.append([])
-                elif tk == ")":
-                    if len(stack) < 2:
-                        break
-                    if len(quote_stack) > 0 and quote_stack[-1] == par_count:
-                        quote_stack.pop()
-                        stack[-2].append(stack.pop())
-                        # par_count -= 1
-                    active = stack.pop()
-                    stack[-1].append(active)
-                    par_count -= 1
-                elif tk == "]":
+            if tk[0] == ";":  # single line comment
+                pass
+            elif is_int(tk):
+                stack[-1].append(int(tk))
+            elif is_float(tk):
+                stack[-1].append(float(tk))
+            elif is_str(tk):
+                stack[-1].append(String(tk[1:-1]))
+            elif tk == "'":
+                quote = ["quote", tokens[i + 1]]
+                i += 1
+                stack[-1].append(quote)
+            elif tk == "true":
+                stack[-1].append(TRUE)
+            elif tk == "false":
+                stack[-1].append(FALSE)
+            elif tk == "null":
+                stack[-1].append(NULL)
+            elif tk == "(":
+                par_count += 1
+                stack.append([])
+            elif tk == "[":
+                stack.append([])
+            elif tk == ")":
+                if len(stack) < 2:
+                    break
+                if len(quote_stack) > 0 and quote_stack[-1] == par_count:
+                    quote_stack.pop()
                     stack[-2].append(stack.pop())
-                elif tk == "'(":
-                    par_count += 1
-                    quote_stack.append(par_count)
-                    stack.append(["quote"])
-                    stack.append([])
-                elif tk not in OMITTED:
-                    stack[-1].append(tk)
+                    # par_count -= 1
+                active = stack.pop()
+                stack[-1].append(active)
+                par_count -= 1
+            elif tk == "]":
+                stack[-2].append(stack.pop())
+            elif tk == "'(":
+                par_count += 1
+                quote_stack.append(par_count)
+                stack.append(["quote"])
+                stack.append([])
+            elif tk not in OMITTED:
+                stack[-1].append(tk)
             i += 1
     except IndexError as e:
         print(stack)
@@ -116,6 +110,21 @@ class Env:
 
     def put(self, name, value):
         self.vars[name] = value
+
+    def update(self, name, value):
+        """
+        This method should only be called for internal usage.
+
+        :param name:
+        :param value:
+        :return:
+        """
+        if name in self.vars:
+            self.vars[name] = value
+        elif self.outer:
+            self.outer.update(name, value)
+        else:
+            raise Error("No name '" + name + "'.")
 
 
 def check_contract(contract, arg, eval_ftn):
@@ -160,7 +169,7 @@ class Function:
                 if i != params_count - 2:
                     raise Error("Variable length parameter must be the last parameter.")
                 name = self.params[i + 1]
-                tup = Tuple()
+                tup = []
                 for j in range(i, len(args)):
                     arg = args[j]
                     if self.param_contracts:
@@ -168,7 +177,7 @@ class Function:
                         check_contract(con, arg, eval_ftn)
                     tup.append(arg)
 
-                nt_list = tuple_to_nt_list(tup, eval_ftn, call_env)
+                nt_list = lst_to_pair(tup)
                 if isinstance(name, str) and name not in INVALID_NAME:
                     call_env.put(name, nt_list)
 
@@ -320,39 +329,187 @@ class Pair:
         else:
             return "(cons {} . {})".format(self.head, self.tail)
 
+    def __repr__(self):
+        return self.__str__()
+
 
 TRUE = Boolean(True)
 FALSE = Boolean(False)
 NULL = Null()
 
-
 DIRECT_RETURN_TYPES = {int, float, Boolean, Null, String}
+
+
+def pair_to_py_list(p):
+    if p is not NULL:
+        if isinstance(p, Pair):
+            return [pair_to_py_list(p.head)] + pair_to_py_list(p.tail)
+        else:
+            return p
+    else:
+        return []
+
+
+def make_pair(lst, i):
+    if i <= len(lst) - 1:
+        return Pair(make_quote(lst[i]), make_pair(lst, i + 1))
+    else:
+        return NULL
+
+
+def make_quote(quote):
+    if isinstance(quote, list):
+        return lst_to_pair(quote)
+    elif quote.__class__ in DIRECT_RETURN_TYPES:
+        return quote
+    else:
+        return Quote(quote)
+
+
+def lst_to_pair(lst: list):
+    return make_pair(lst, 0)
 
 
 def boolean(value: bool) -> Boolean:
     return TRUE if value else FALSE
 
 
+def error(error_str: str):
+    raise Error(error_str)
+
+
+def make_struct(name: str, parent, content: list, env: Env):
+    parent_struct = env.get(parent) if parent else None
+    if env.has_name(name):
+        raise Error("Struct '" + name + "' is already defined in this scope.")
+
+    getters = {}
+
+    def getter_fn(param_name):
+        return lambda obj: \
+            obj.attrs[param_name] \
+                if isinstance(obj, StructObj) else error("Struct '" + name + "' expected, got a " + str(obj))
+
+    for param in content:
+        if not isinstance(param, str) or param in INVALID_NAME:
+            raise Error("Struct member must be a name.")
+        getter_name = name + "." + param
+        getters[getter_name] = getter_fn(param)
+
+    struct = Struct(name, parent_struct, content)
+
+    env.put(name, struct)
+    env.put(name + "?",  # checker function
+            lambda obj: boolean(struct.is_child_of_this(obj.struct)) if isinstance(obj, StructObj) else FALSE)
+    env.put(name + ".str", lambda s: String(str(s)))  # default to string function
+    for getter_name in getters:
+        env.put(getter_name, getters[getter_name])
+
+    return struct
+
+
+# builtin functions
+
+
+def atom(x):
+    return boolean(not isinstance(x, list) or len(x) == 0)
+
+
+def cons(head, tail=NULL):
+    return Pair(head, tail)
+
+
+def is_pair(lst):
+    return isinstance(lst, Pair) or lst is NULL
+
+
+def make_map(eval_ftn):
+
+    def fn(ftn, *lists):
+        res = []
+        lst_count = len(lists)
+        if lst_count == 0:
+            raise Error("Function map takes at least 2 arguments.")
+
+        arg_list = list(lists)
+        while True:
+            if arg_list[0] is NULL:  # reach the end of
+                if any([x is not NULL for x in arg_list]):
+                    raise Error("All lists to function map must have equal lengths.")
+                break
+
+            cur_heads = []
+            for i in range(lst_count):
+                p: Pair = arg_list[i]
+                cur_heads.append(p.head)
+                arg_list[i] = p.tail
+
+            if callable(ftn):
+                res.append(ftn(*cur_heads))
+            elif isinstance(ftn, Function):
+                res.append(ftn.call(eval_ftn, cur_heads))
+            else:
+                raise Error("First argument of function map must be a function.")
+
+        return lst_to_pair(res)
+
+    return fn
+
+
+def make_foldl(eval_ftn):
+
+    def fn(ftn, init, *lists):
+        res = init
+        lst_count = len(lists)
+        if lst_count == 0:
+            raise Error("Function map takes at least 2 arguments.")
+
+        arg_list = list(lists)
+        while True:
+            if arg_list[0] is NULL:  # reach the end of
+                if any([x is not NULL for x in arg_list]):
+                    raise Error("All lists to function map must have equal lengths.")
+                break
+
+            cur_heads = []
+            for i in range(lst_count):
+                p: Pair = arg_list[i]
+                cur_heads.append(p.head)
+                arg_list[i] = p.tail
+
+            if callable(ftn):
+                res = ftn(*cur_heads, res)
+            elif isinstance(ftn, Function):
+                res = ftn.call(eval_ftn, [*cur_heads, res])
+            else:
+                raise Error("First argument of function map must be a function.")
+
+        return res
+
+    return fn
+
+
 def is_fn(f) -> Boolean:
     return boolean(callable(f) or isinstance(f, Function))
 
 
-def make_nt_apply(eval_ftn, env: Env):
+def make_nt_apply(eval_ftn):
     def apply(ftn, lst):
         if callable(ftn):
             if isinstance(lst, StructObj) and lst.struct.name == "list":
-                py_lst = nt_list_to_py_list(lst, eval_ftn, env)
+                py_lst = pair_to_py_list(lst)
                 return ftn(*py_lst)
             else:
                 raise Error("Apply takes a list as second argument.")
         elif isinstance(ftn, Function):
             if isinstance(lst, StructObj) and lst.struct.name == "list":
-                py_lst = nt_list_to_py_list(lst, eval_ftn, env)
+                py_lst = pair_to_py_list(lst)
                 return ftn.call(eval_ftn, py_lst)
             else:
                 raise Error("Apply takes a list as second argument.")
         else:
             raise Error("Apply takes either a builtin function or a user-defined function as first argument.")
+
     return apply
 
 
@@ -373,68 +530,11 @@ def make_to_str_ftn(eval_ftn, env: Env):
     return to_str_fn
 
 
-def error(error_str: str):
-    raise Error(error_str)
-
-
-def make_pair(lst, i):
-    if i <= len(lst) - 1:
-        return Pair(make_quote(lst[i]), make_pair(lst, i + 1))
-    else:
-        return NULL
-
-
-def make_quote(quote):
-    if isinstance(quote, list):
-        return make_pair(quote, 0)
-    else:
-        return Quote(quote)
-
-
-def cons(head, tail=NULL):
-    return Pair(head, tail)
-
-
-def make_struct(name: str, parent, content: list, env: Env):
-    parent_struct = env.get(parent) if parent else None
-    if env.has_name(name):
-        raise Error("Struct '" + name + "' is already defined in this scope.")
-
-    getters = {}
-
-    def getter_fn(param_name):
-        return lambda obj: \
-            obj.attrs[param_name] \
-            if isinstance(obj, StructObj) else error("Struct '" + name + "' expected, got a " + str(obj))
-
-    for param in content:
-        if not isinstance(param, str) or param in INVALID_NAME:
-            raise Error("Struct member must be a name.")
-        getter_name = name + "." + param
-        getters[getter_name] = getter_fn(param)
-
-    struct = Struct(name, parent_struct, content)
-
-    env.put(name, struct)
-    env.put(name + "?",  # checker function
-            lambda obj: boolean(struct.is_child_of_this(obj.struct)) if isinstance(obj, StructObj) else FALSE)
-    env.put(name + ".str", lambda s: String(str(s)))  # default to string function
-    for getter_name in getters:
-        env.put(getter_name, getters[getter_name])
-
-    return struct
-
-
-def atom(x):
-    return boolean(not isinstance(x, list) or len(x) == 0)
-
-
-def is_pair(lst):
-    return isinstance(lst, Pair) or lst is NULL
-
-
-def foldl_n():
-    pass
+def update_eval_ftn(env: Env, eval_ftn):
+    env.put("apply", make_nt_apply(eval_ftn))
+    env.put("foldl", make_foldl(eval_ftn))
+    env.put("map", make_map(eval_ftn))
+    env.put("str", make_to_str_ftn(eval_ftn, env))
 
 
 def put_builtins(env: Env, main_eval_ftn):
@@ -450,7 +550,6 @@ def put_builtins(env: Env, main_eval_ftn):
     env.put("==", lambda a, b: boolean(a == b))
     env.put("and", lambda *args: boolean(all(args)))
     env.put("any", lambda x: TRUE)
-    env.put("apply", make_nt_apply(main_eval_ftn, env))
     env.put("atom?", atom)
     env.put("boolean?", lambda b: boolean(b is TRUE or b is FALSE))
     env.put("car", lambda lst: lst.head if is_pair(lst) else error("Function car takes a pair as argument, '{}' given."
@@ -467,12 +566,11 @@ def put_builtins(env: Env, main_eval_ftn):
     env.put("null?", lambda n: boolean(n is NULL))
     env.put("or", lambda *args: boolean(any(args)))
     env.put("pair", lambda p: boolean(is_pair(p)))
-    env.put("str", make_to_str_ftn(main_eval_ftn, env))
     env.put("str?", lambda s: boolean(isinstance(s, String)))
     env.put("struct?", lambda s: boolean(isinstance(s, Struct)))
-    env.put("tuple?", lambda t: boolean(isinstance(t, Tuple)))
-    env.put("tuple.get", lambda t, i: t[i])
-    env.put("tuple.length", lambda t: len(t))
+
+    # Put Non-pure functions
+    update_eval_ftn(env, main_eval_ftn)
 
 
 class NtFileInterpreter:
@@ -539,8 +637,6 @@ class NtFileInterpreter:
             return expr
         elif isinstance(expr, str):
             return env.get(expr)
-        elif expr.__class__ == Tuple:
-            return tuple_to_nt_list(expr, self.evaluate, env)
         elif expr.__class__ == list:
             if len(expr) > 0:
                 first = expr[0]
@@ -656,8 +752,11 @@ class NtFileInterpreter:
                         full_path = self.get_import_path(file_name)
                         if full_path not in self.required:  # avoid duplicate request
                             self.required.add(full_path)
+
                             file_itr = NtFileInterpreter(full_path, self.required)
+                            update_eval_ftn(env, file_itr.evaluate)  # update eval function
                             file_itr.interpret(False, env)
+                            update_eval_ftn(env, self.evaluate)  # restore eval function
                     else:
                         raise Error("Require must have two parts: (require file). ")
                 else:  # function call
@@ -676,20 +775,6 @@ class NtFileInterpreter:
 
 
 # helper functions
-
-def tuple_to_nt_list(tup: Tuple, eval_ftn, env: Env):
-    make: Function = env.get("list.make")
-    return make.call(eval_ftn, [tup])
-
-
-def nt_list_to_py_list(lst: StructObj, eval_ftn, env: Env) -> list:
-    get: Function = env.get("list.get")
-    len_ftn: Function = env.get("list.length")
-    length: int = len_ftn.call(eval_ftn, [lst])
-    py_lst = []
-    for i in range(length):
-        py_lst.append(get.call(eval_ftn, [lst, i]))
-    return py_lst
 
 
 def is_int(s: str) -> bool:
@@ -724,10 +809,13 @@ test = """
 :(+ a (+ 2 (f 3)))
 """
 
-
 if __name__ == '__main__':
     import sys
     import os
+
+    # ss = make_pair([1, 2, 3, [4, 5], 6], 0)
+    # print(ss)
+    # print(pair_to_py_list(ss))
 
     if len(sys.argv) > 1:
         src_file = sys.argv[1]

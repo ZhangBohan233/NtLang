@@ -1,2 +1,5 @@
 # NtLang
- A pure functional programming language
+##### An extended _Lisp_ Implementation.
+
+
+
